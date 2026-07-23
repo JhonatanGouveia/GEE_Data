@@ -1,0 +1,54 @@
+// ====================================================================
+// CONFIGURAÇÕES
+// ====================================================================
+var ano = 2020;  // ← PADRÃO: ALTERE AQUI PARA OUTRO ANO
+var municipios = ee.FeatureCollection('projects/iclei-494717/assets/RJ_Municipios_Selecionados_ONU_Habitat_V2');
+var escala = 5000;  // metros (aumente para 10000 se houver erro de memória)
+
+Map.centerObject(municipios, 8);
+
+// ====================================================================
+// CARREGAR DADOS DIÁRIOS DO ERA5-LAND PARA O ANO
+// ====================================================================
+var inicio = ee.Date.fromYMD(ano, 1, 1);
+var fim = ee.Date.fromYMD(ano, 12, 31);
+
+var era5 = ee.ImageCollection('ECMWF/ERA5_LAND/DAILY_AGGR')
+  .filterDate(inicio, fim)
+  .filterBounds(municipios.geometry());
+
+// ====================================================================
+// CALCULAR TNn: MÍNIMO ANUAL DA TEMPERATURA MÍNIMA DIÁRIA
+// ====================================================================
+var tnn = era5.select('temperature_2m_min')
+  .min()
+  .rename('tnn');
+
+// ====================================================================
+// EXTRAIR O VALOR MÉDIO DO TNn DENTRO DE CADA MUNICÍPIO
+// ====================================================================
+var stats = tnn.reduceRegions({
+  collection: municipios,
+  reducer: ee.Reducer.mean(),
+  scale: escala
+});
+
+// Adiciona o ano como propriedade
+var resultado = stats.map(function(f) {
+  return f.set('year', ano);
+});
+
+// ====================================================================
+// EXPORTAR CSV PARA O GOOGLE DRIVE
+// ====================================================================
+Export.table.toDrive({
+  collection: resultado,
+  description: 'TNn_' + ano,
+  fileFormat: 'CSV',
+  selectors: ['id', 'year', 'tnn']  // substitua 'id' pelo campo do seu asset
+});
+
+// ====================================================================
+// VISUALIZAR NO MAPA (opcional)
+// ====================================================================
+Map.addLayer(tnn, {min: 270, max: 290, palette: ['blue', 'green', 'yellow']}, 'TNn ' + ano);
