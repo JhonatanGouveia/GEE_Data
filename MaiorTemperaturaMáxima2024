@@ -1,0 +1,73 @@
+// ====================================================================
+// CONFIGURAÇÕES
+// ====================================================================
+var ano = 2024;
+var bacia = ee.FeatureCollection('projects/iclei-494717/assets/Bacia_POA_Buffer_4326');
+var escala = 5000;
+
+Map.centerObject(bacia, 8);
+
+// ====================================================================
+// CARREGAR DADOS DIÁRIOS DO ERA5-LAND PARA O ANO
+// ====================================================================
+var inicio = ee.Date.fromYMD(ano, 1, 1);
+var fim = ee.Date.fromYMD(ano, 12, 31);
+
+var era5 = ee.ImageCollection('ECMWF/ERA5_LAND/DAILY_AGGR')
+  .filterDate(inicio, fim)
+  .filterBounds(bacia.geometry());
+
+// ====================================================================
+// CALCULAR TXx: MÁXIMO ANUAL DA TEMPERATURA MÁXIMA DIÁRIA
+// ====================================================================
+var txx = era5.select('temperature_2m_max')  // banda com a temperatura máxima do dia
+  .max()                                     // máximo de todos os dias do ano
+  .rename('txx');
+
+// ====================================================================
+// RECORTAR O RASTER PELA GEOMETRIA DO ASSET
+// ====================================================================
+var txxRecortado = txx.clip(bacia.geometry());
+
+// ====================================================================
+// EXTRAIR O VALOR MÉDIO DO TXx DENTRO DE CADA FEIÇÃO
+// ====================================================================
+var stats = txxRecortado.reduceRegions({
+  collection: bacia,
+  reducer: ee.Reducer.mean(),
+  scale: escala
+});
+
+// Adiciona o ano como propriedade
+var resultado = stats.map(function(f) {
+  return f.set('year', ano);
+});
+
+// ====================================================================
+// EXPORTAR CSV PARA O GOOGLE DRIVE
+// ====================================================================
+Export.table.toDrive({
+  collection: resultado,
+  description: 'TXx_' + ano + '_BaciaPOA',
+  fileFormat: 'CSV',
+  selectors: ['system:index', 'year', 'txx']  // usa system:index como identificador
+});
+
+// ====================================================================
+// EXPORTAR RASTER RECORTADO (opcional)
+// ====================================================================
+Export.image.toDrive({
+  image: txxRecortado,
+  description: 'TXx_raster_' + ano + '_BaciaPOA',
+  fileNamePrefix: 'TXx_raster_' + ano + '_BaciaPOA',
+  region: bacia.geometry(),
+  scale: escala,
+  crs: 'EPSG:4326',
+  maxPixels: 1e13
+});
+
+// ====================================================================
+// VISUALIZAR NO MAPA
+// ====================================================================
+Map.addLayer(txxRecortado, {min: 290, max: 310, palette: ['blue', 'green', 'yellow', 'red']}, 'TXx ' + ano);
+Map.addLayer(bacia.style({color: 'red', fillColor: '00000000', width: 2}), {}, 'Limite da Bacia');
