@@ -1,0 +1,73 @@
+// ====================================================================
+// CONFIGURAÇÕES
+// ====================================================================
+var ano = 2024;
+var bacia = ee.FeatureCollection('projects/iclei-494717/assets/Bacia_POA_Buffer_4326');
+var escala = 5000;
+
+Map.centerObject(bacia, 8);
+
+// ====================================================================
+// CARREGAR DADOS DIÁRIOS DO ERA5-LAND PARA O ANO
+// ====================================================================
+var inicio = ee.Date.fromYMD(ano, 1, 1);
+var fim = ee.Date.fromYMD(ano, 12, 31);
+
+var era5 = ee.ImageCollection('ECMWF/ERA5_LAND/DAILY_AGGR')
+  .filterDate(inicio, fim)
+  .filterBounds(bacia.geometry());
+
+// ====================================================================
+// CALCULAR TNn: MÍNIMO ANUAL DA TEMPERATURA MÍNIMA DIÁRIA
+// ====================================================================
+var tnn = era5.select('temperature_2m_min')
+  .min()
+  .rename('tnn');
+
+// ====================================================================
+// RECORTAR O RASTER PELA GEOMETRIA DO ASSET
+// ====================================================================
+var tnnRecortado = tnn.clip(bacia.geometry());
+
+// ====================================================================
+// EXTRAIR O VALOR MÉDIO DO TNn DENTRO DE CADA FEIÇÃO
+// ====================================================================
+var stats = tnnRecortado.reduceRegions({
+  collection: bacia,
+  reducer: ee.Reducer.mean(),
+  scale: escala
+});
+
+// Adiciona o ano como propriedade
+var resultado = stats.map(function(f) {
+  return f.set('year', ano);
+});
+
+// ====================================================================
+// EXPORTAR CSV PARA O GOOGLE DRIVE
+// ====================================================================
+Export.table.toDrive({
+  collection: resultado,
+  description: 'TNn_' + ano + '_BaciaPOA',
+  fileFormat: 'CSV',
+  selectors: ['system:index', 'year', 'tnn']  // usa system:index como identificador
+});
+
+// ====================================================================
+// EXPORTAR RASTER RECORTADO (opcional)
+// ====================================================================
+Export.image.toDrive({
+  image: tnnRecortado,
+  description: 'TNn_raster_' + ano + '_BaciaPOA',
+  fileNamePrefix: 'TNn_raster_' + ano + '_BaciaPOA',
+  region: bacia.geometry(),
+  scale: escala,
+  crs: 'EPSG:4326',
+  maxPixels: 1e13
+});
+
+// ====================================================================
+// VISUALIZAR NO MAPA
+// ====================================================================
+Map.addLayer(tnnRecortado, {min: 270, max: 290, palette: ['blue', 'green', 'yellow']}, 'TNn ' + ano);
+Map.addLayer(bacia.style({color: 'red', fillColor: '00000000', width: 2}), {}, 'Limite da Bacia');
